@@ -51,6 +51,7 @@
     <Compile Include="SecurityAccessManager.cs" />
     <Compile Include="SeedToKey.cs" />
     <Compile Include="SerialCommunication.cs" />
+    <Compile Include="Tech2DataParser.cs" />
     <Compile Include="TechAppForm.cs">
       <SubType>Form</SubType>
     </Compile>

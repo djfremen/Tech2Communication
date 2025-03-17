@@ -16,75 +16,111 @@ namespace Tech2Communication
     {
         private SerialCommunication serialComm;
         private SeedToKey seedCalculator;
+        private Tech2DataParser tech2DataParser;
 
         public SecurityAccessManager(SerialCommunication serialComm)
         {
             this.serialComm = serialComm;
             this.seedCalculator = new SeedToKey();
+            this.tech2DataParser = new Tech2DataParser();
         }
 
         public bool RequestSecurityAccess(AccessLevel level, out string extractedVIN)
         {
             extractedVIN = string.Empty;
 
-            // Format security access request based on access level
-            byte[] requestCmd = FormatSecurityAccessRequest(level);
-
-            // Send the request and receive seed
-            byte[] response = serialComm.SendAndReceive(requestCmd, 500);
-            if (response == null || response.Length < 4)
+            try
             {
-                Console.WriteLine("Failed to receive seed response");
-                return false;
-            }
+                // Format security access request based on access level
+                byte[] requestCmd = FormatSecurityAccessRequest(level);
 
-            // Extract seed from response
-            byte[] seed = new byte[2];
-            // Typically seed is in bytes 3-4 of the response
-            seed[0] = response[3];
-            seed[1] = response[4];
-
-            // Check if seed is 0x0000, which means security access is already granted
-            if (seed[0] == 0x00 && seed[1] == 0x00)
-            {
-                return true;
-            }
-
-            // Extract VIN from the seed response if available
-            extractedVIN = ExtractVINFromSeed(response);
-
-            // Calculate key based on seed
-            byte[] key = seedCalculator.CalculateKey(seed, level);
-
-            // Wait a bit before sending key (some ECUs require this)
-            Thread.Sleep(100);
-
-            // Format and send the key response
-            byte[] keyCmd = FormatKeyResponse(key, level);
-            byte[] keyResponse = serialComm.SendAndReceive(keyCmd, 500);
-
-            // Check if access was granted
-            if (keyResponse != null && keyResponse.Length >= 3)
-            {
-                // Response should be something like: 0x01, 0x67, 0xFE (for AccessLevelFD)
-                if (keyResponse[1] == 0x67 &&
-                   (keyResponse[2] == 0xFE || keyResponse[2] == 0xFC || keyResponse[2] == 0x02))
+                // Send the request and receive seed
+                byte[] response = serialComm.SendAndReceive(requestCmd, 500);
+                if (response == null || response.Length < 5)
                 {
-                    Console.WriteLine("Security access granted");
+                    Console.WriteLine("Failed to receive seed response");
+                    return false;
+                }
+
+                // Extract seed from response
+                byte[] seed = new byte[2];
+                // Typically seed is in bytes 3-4 of the response
+                seed[0] = response[3];
+                seed[1] = response[4];
+
+                // Log the seed for debugging
+                Console.WriteLine($"Received seed: {BitConverter.ToString(seed)}");
+
+                // Check if seed is 0x0000, which means security access is already granted
+                if (seed[0] == 0x00 && seed[1] == 0x00)
+                {
+                    Console.WriteLine("Security access already granted (seed 0000)");
+
+                    // Even if security is already granted, try to extract VIN
+                    extractedVIN = ReadVehicleVIN();
                     return true;
                 }
-                else if (keyResponse[1] == 0x7F && keyResponse[2] == 0x27)
-                {
-                    Console.WriteLine($"Security access error: {TranslateErrorCode(keyResponse[3])}");
-                }
-            }
 
-            return false;
+                // Try to extract VIN from the response data
+                // First try Tech2 data parsing approach
+                extractedVIN = tech2DataParser.ExtractVINFromTech2Data(response);
+
+                // If that didn't work, we'll try direct VIN request after security access
+
+                // Calculate key based on seed
+                byte[] key = seedCalculator.CalculateKey(seed, level);
+                Console.WriteLine($"Calculated key: {BitConverter.ToString(key)}");
+
+                // Wait a bit before sending key (some ECUs require this)
+                Thread.Sleep(100);
+
+                // Format and send the key response
+                byte[] keyCmd = FormatKeyResponse(key, level);
+                byte[] keyResponse = serialComm.SendAndReceive(keyCmd, 500);
+
+                // Check if access was granted
+                if (keyResponse != null && keyResponse.Length >= 3)
+                {
+                    // Response should be something like: 0x01, 0x67, 0xFE (for AccessLevelFD)
+                    if (keyResponse[1] == 0x67 &&
+                       (keyResponse[2] == 0xFE || keyResponse[2] == 0xFC || keyResponse[2] == 0x02))
+                    {
+                        Console.WriteLine("Security access granted");
+
+                        // If we didn't get VIN from Tech2 data parsing, try direct request
+                        if (string.IsNullOrEmpty(extractedVIN))
+                        {
+                            extractedVIN = ReadVehicleVIN();
+                        }
+
+                        return true;
+                    }
+                    else if (keyResponse[1] == 0x7F && keyResponse[2] == 0x27)
+                    {
+                        Console.WriteLine($"Security access error: {TranslateErrorCode(keyResponse[3])}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Unexpected response: {BitConverter.ToString(keyResponse)}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("No valid response received to key request");
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception during security access: {ex.Message}");
+                return false;
+            }
         }
 
         private byte[] FormatSecurityAccessRequest(AccessLevel level)
         {
-            // Format based on the TIS2Web protocol
+            // Format based on the Tech2 protocol
             byte[] cmd = new byte[]{
                 0x07, // Length
                 0xE0, // ID high byte (0x7E0 is standard diagnostic address)
@@ -144,51 +180,59 @@ namespace Tech2Communication
             return cmd;
         }
 
-        private string ExtractVINFromSeed(byte[] response)
+        private string ReadVehicleVIN()
         {
-            // This is where you'd implement the VIN extraction algorithm
-            // The exact algorithm will depend on how the VIN is encoded in the seed response
-
-            // Placeholder for the actual implementation
-            // In the original TIS2Web, this might involve specific decoding of the seed value
-            // or additional data fields in the response
-
             try
             {
-                // Example implementation - this is simplified and needs to be adjusted
-                // In reality, you'd need to analyze the TIS2Web code to see how it extracts the VIN
+                // Format ReadDataByIdentifier request with VIN identifier
+                byte[] vinRequest = new byte[]{
+                    0x07, // Length
+                    0xE0, // ID high byte (0x7E0)
+                    0x00, // ID low byte
+                    0x03, // Data length
+                    0x22, // Service ID: ReadDataByIdentifier
+                    0xF1, // VIN identifier high byte
+                    0x90  // VIN identifier low byte
+                };
 
-                // Check if the response contains enough data
-                if (response.Length < 10) return string.Empty;
+                Console.WriteLine("Sending ReadDataByIdentifier for VIN");
 
-                // The VIN might be encoded in bytes after the seed
-                // or might require a separate request after security access
+                // Send request and receive response
+                byte[] response = serialComm.SendAndReceive(vinRequest, 500);
 
-                // Placeholder VIN extraction - replace with actual algorithm
-                StringBuilder vin = new StringBuilder();
-                for (int i = 5; i < Math.Min(response.Length, 22); i++)
+                if (response == null || response.Length < 5)
                 {
-                    // Filter for valid VIN characters
-                    if ((response[i] >= 'A' && response[i] <= 'Z') ||
-                        (response[i] >= '0' && response[i] <= '9'))
+                    Console.WriteLine("No valid response for VIN request");
+                    return string.Empty;
+                }
+
+                // Check for positive response
+                if (response[4] != 0x62) // 0x62 is positive response to 0x22
+                {
+                    Console.WriteLine($"Negative response to VIN request: {BitConverter.ToString(response)}");
+                    return string.Empty;
+                }
+
+                // Extract VIN from response (typically starts at offset 6)
+                StringBuilder vin = new StringBuilder();
+                for (int i = 6; i < response.Length && vin.Length < 17; i++)
+                {
+                    // Filter for valid VIN characters (A-Z, 0-9)
+                    char c = (char)response[i];
+                    if ((c >= 'A' && c <= 'Z' && c != 'I' && c != 'O' && c != 'Q') ||
+                        (c >= '0' && c <= '9'))
                     {
-                        vin.Append((char)response[i]);
+                        vin.Append(c);
                     }
                 }
 
-                // Standard VIN is 17 characters
-                if (vin.Length == 17)
-                {
-                    return vin.ToString();
-                }
-
-                // If we can't extract the VIN from the seed response,
-                // it might need a separate ReadDataByIdentifier request
-                return string.Empty;
+                string vinString = vin.ToString();
+                Console.WriteLine($"Extracted VIN: {vinString}");
+                return vinString;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error extracting VIN: {ex.Message}");
+                Console.WriteLine($"Exception reading VIN: {ex.Message}");
                 return string.Empty;
             }
         }
@@ -213,19 +257,31 @@ namespace Tech2Communication
 
         public void SendKeepAlive()
         {
-            // Send tester present message
-            byte[] cmd = new byte[]{
-                0x06, // Length
-                0xE0, // ID high byte
-                0x00, // ID low byte
-                0x02, // Data length
-                0x3E, // Service ID: Tester Present
-                0x00  // Subfunction: Default
-            };
+            try
+            {
+                // Send tester present message
+                byte[] cmd = new byte[]{
+                    0x06, // Length
+                    0xE0, // ID high byte
+                    0x00, // ID low byte
+                    0x02, // Data length
+                    0x3E, // Service ID: Tester Present
+                    0x00  // Subfunction: Default
+                };
 
-            serialComm.Send(cmd);
-            // Optionally wait for response
-            // serialComm.Receive(100);
+                serialComm.Send(cmd);
+                // Optionally wait for response
+                byte[] response = serialComm.Receive(100);
+
+                // Don't log this to avoid cluttering the console
+                // if (response != null && response.Length > 0)
+                //     Console.WriteLine("Keep-alive response received");
+            }
+            catch (Exception ex)
+            {
+                // Just log but don't throw - keep-alive failures shouldn't interrupt workflow
+                Console.WriteLine($"Failed to send keep-alive: {ex.Message}");
+            }
         }
     }
 }
