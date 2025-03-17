@@ -1,0 +1,9 @@
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\obj\Debug\Tech2Communication.csproj.AssemblyReference.cache
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\obj\Debug\Tech2Communication.Properties.Resources.resources
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\obj\Debug\Tech2Communication.csproj.GenerateResource.cache
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\obj\Debug\Tech2Communication.csproj.CoreCompileInputs.cache
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\bin\Debug\Tech2Communication.exe.config
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\bin\Debug\Tech2Communication.exe
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\bin\Debug\Tech2Communication.pdb
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\obj\Debug\Tech2Communication.exe
+C:\Users\manfr\source\repos\Tech2Communication\Tech2Communication\obj\Debug\Tech2Communication.pdb
