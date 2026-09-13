@@ -2,3 +2,7 @@
 .vs/
 **/bin/
 **/obj/
+# Local/capture fixtures (may contain VIN/SSA)
+*.json.txt
+response.json.txt
+request.json.txt
